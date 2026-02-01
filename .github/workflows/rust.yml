@@ -38,10 +38,13 @@ jobs:
           # Print to stdout for CI logs
           cat coverage.raw
 
-          # Create coverage.txt with markdown code block for the PR comment
-          echo '```text' > coverage.txt
-          cat coverage.raw >> coverage.txt
-          echo '```' >> coverage.txt
+          # Create a pretty markdown table for the PR comment
+          echo "### Code Coverage Summary" > coverage.txt
+          echo "| Type | Total | Missed | Coverage |" >> coverage.txt
+          echo "|:---|:---:|:---:|:---:|" >> coverage.txt
+          
+          # Parse the TOTAL line and format it into a Markdown table
+          grep "^TOTAL" coverage.raw | awk '{ printf "| Regions | %s | %s | %s |\n| Functions | %s | %s | %s |\n| Lines | %s | %s | %s |\n| Branches | %s | %s | %s |\n", $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' >> coverage.txt
 
       # Only Ubuntu posts the comment to avoid duplicate notifications on the PR
       - name: Comment coverage
