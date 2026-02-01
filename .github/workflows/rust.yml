@@ -25,7 +25,7 @@ jobs:
           LICENSE_FILE=".github/license_header.rs"
           MISSING=0
           while IFS= read -r file; do
-            if ! head -n "$(wc -l < "$LICENSE_FILE")" "$file" | diff -u - "$LICENSE_FILE"; then
+            if ! head -n "$(wc -l < "$LICENSE_FILE")" "$file" | diff -u "$LICENSE_FILE" -; then
               echo "❌ Missing or incorrect license in: $file"
               MISSING=1
             fi
@@ -123,8 +123,8 @@ jobs:
 
           # Coverage Row (Summary)
           if [ "$STATUS_COV" == "✅" ]; then
-             # Extract total line coverage percentage (Column 10 is usually Line Coverage, $NF is Branch Coverage)
-             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{print $10}' || echo "N/A")
+             # Extract total coverage percentage by matching percentage-like fields instead of relying on a fixed column
+             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]\+%$/) last = $i; } END { if (last != "") print last; }' || echo "N/A")
              echo "| **Coverage** | ℹ️ | **$COV_PERCENT** |" >> "$COMMENT_FILE"
           else
              echo "| **Coverage** | ⛔ | Skipped |" >> "$COMMENT_FILE"
@@ -149,7 +149,12 @@ jobs:
             echo "" >> "$COMMENT_FILE"
             echo '```text' >> "$COMMENT_FILE"
             # Clean up the log for success (remove file table to keep it short)
-            sed '/^Filename/,$d' "$OUTPUT_FILE" >> "$COMMENT_FILE"
+            # If the expected 'Filename' header exists, strip from there; otherwise, fall back to last 100 lines
+            if grep -q '^Filename' "$OUTPUT_FILE"; then
+              sed '/^Filename/,$d' "$OUTPUT_FILE" >> "$COMMENT_FILE"
+            else
+              tail -n 100 "$OUTPUT_FILE" >> "$COMMENT_FILE"
+            fi
           else
             echo "<summary>🔴 <strong>Click to view Failure Logs</strong></summary>" >> "$COMMENT_FILE"
             echo "" >> "$COMMENT_FILE"
@@ -176,6 +181,10 @@ jobs:
       - name: Check Run Status
         shell: bash
         run: |
+          if [ ! -s exit_code.txt ]; then
+            echo "Error: exit_code.txt not found or is empty"
+            exit 1
+          fi
           EXIT_CODE=$(cat exit_code.txt)
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "Workflow failed with exit code $EXIT_CODE"
