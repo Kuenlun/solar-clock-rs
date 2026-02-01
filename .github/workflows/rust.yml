@@ -29,124 +29,120 @@ jobs:
 
       - name: Measure coverage
         shell: bash
+        id: coverage_step
         run: |
-          # 1. SETUP & CONFIGURATION
-          # ------------------------
+          # --- CONFIGURATION ---
           OUTPUT_FILE="coverage.raw"
           COMMENT_FILE="coverage.txt"
 
-          # Initialize status variables (Default to Skipped/Unknown)
-          BUILD_STATUS="⚪"
-          TEST_STATUS="⚪"
-          COV_STATUS="ℹ️"
+          # Initialize default statuses (Assuming worst case or skipped)
+          STATUS_BUILD="❌"
+          STATUS_TEST="⛔" # Defaults to skipped/blocked
+          STATUS_COV="⛔"  # Defaults to skipped/blocked
 
-          # 2. EXECUTION
-          # ------------
-          # Turn off 'exit on error' temporarily to capture the exit code
+          # --- EXECUTION ---
+          # We disable 'exit on error' (set +e) to handle the failure manually
           set +e
 
-          # Run tests and collect coverage. 
-          # Redirect stderr to stdout to capture compiler errors in the same file.
-          cargo llvm-cov --all-features --workspace --verbose --color never > "$OUTPUT_FILE" 2>&1
+          # Run cargo llvm-cov. 
+          # We redirect stderr to stdout (2>&1) to capture compiler errors in the same file.
+          cargo llvm-cov --all-features --workspace --color never > "$OUTPUT_FILE" 2>&1
           EXIT_CODE=$?
 
-          # Re-enable 'exit on error' for safety in later commands (optional but good practice)
+          # Re-enable 'exit on error'
           set -e
 
-          # 3. LOGIC ANALYSIS
-          # -----------------
-          # Check if compilation failed or tests failed based on output and exit code
+          # --- LOGIC ANALYSIS ---
+
+          # Scenario 1: Everything passed
           if [ $EXIT_CODE -eq 0 ]; then
-            BUILD_STATUS="✅"
-            TEST_STATUS="✅"
+            STATUS_BUILD="✅"
+            STATUS_TEST="✅"
+            STATUS_COV="✅" # Will display info icon or percentage later
           else
-            # If command failed, check if it was a test failure or build failure
-            if grep -q "test result: FAILED" "$OUTPUT_FILE"; then
-              BUILD_STATUS="✅" # Build passed, but tests failed
-              TEST_STATUS="❌"
+            # Scenario 2: Failure occurred. Was it Build or Tests?
+            # If the output contains "test result:", it means compilation finished and tests ran (but failed).
+            if grep -q "test result:" "$OUTPUT_FILE"; then
+              STATUS_BUILD="✅"
+              STATUS_TEST="❌"
+              STATUS_COV="⛔" # Coverage is irrelevant if tests fail
             else
-              BUILD_STATUS="❌" # Likely a compilation error
-              TEST_STATUS="⛔"  # Tests didn't run
+              # Scenario 3: Compilation failed (no test result line found)
+              STATUS_BUILD="❌"
+              STATUS_TEST="⛔"
+              STATUS_COV="⛔"
             fi
           fi
 
-          # 4. REPORT GENERATION
-          # --------------------
-          # Header
+          # --- REPORT GENERATION ---
+
           echo "### 🦀 Rust CI Report" > "$COMMENT_FILE"
 
-          # Summary Table
+          # 1. Summary Table
           echo "| Category | Status | Details |" >> "$COMMENT_FILE"
           echo "|:---|:---:|:---|" >> "$COMMENT_FILE"
-          echo "| **Compilation** | $BUILD_STATUS | $([ "$BUILD_STATUS" == "✅" ] && echo "Success" || echo "Failed") |" >> "$COMMENT_FILE"
 
-          # Test Details Logic
-          if [ "$TEST_STATUS" == "✅" ]; then
-             TEST_TEXT="All tests passed"
-          elif [ "$TEST_STATUS" == "❌" ]; then
-             TEST_TEXT="Some tests failed"
+          # Build Row
+          if [ "$STATUS_BUILD" == "✅" ]; then
+             echo "| **Compilation** | ✅ | Success |" >> "$COMMENT_FILE"
           else
-             TEST_TEXT="Skipped"
+             echo "| **Compilation** | ❌ | **Failed** |" >> "$COMMENT_FILE"
           fi
-          echo "| **Tests** | $TEST_STATUS | $TEST_TEXT |" >> "$COMMENT_FILE"
 
-          # Coverage Parsing (Only if tests ran somewhat successfully)
-          if [ "$BUILD_STATUS" == "✅" ]; then
-             # Extract general coverage percentage for the summary (grabbing the last percentage from the Lines row)
-             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{print $NF}' || echo "N/A")
-             echo "| **Coverage** | $COV_STATUS | $COV_PERCENT |" >> "$COMMENT_FILE"
+          # Test Row
+          if [ "$STATUS_TEST" == "✅" ]; then
+             echo "| **Tests** | ✅ | All tests passed |" >> "$COMMENT_FILE"
+          elif [ "$STATUS_TEST" == "❌" ]; then
+             echo "| **Tests** | ❌ | **Some tests failed** |" >> "$COMMENT_FILE"
           else
-             echo "| **Coverage** | ⛔ | N/A |" >> "$COMMENT_FILE"
+             echo "| **Tests** | ⛔ | Skipped (Build failed) |" >> "$COMMENT_FILE"
+          fi
+
+          # Coverage Row (Summary)
+          if [ "$STATUS_COV" == "✅" ]; then
+             # Extract total line coverage percentage (Column 10 is usually Line Coverage, $NF is Branch Coverage)
+             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{print $10}' || echo "N/A")
+             echo "| **Coverage** | ℹ️ | **$COV_PERCENT** |" >> "$COMMENT_FILE"
+          else
+             echo "| **Coverage** | ⛔ | Skipped |" >> "$COMMENT_FILE"
           fi
 
           echo "" >> "$COMMENT_FILE"
 
-          # Detailed Coverage Table (Only if build passed)
-          if [ "$BUILD_STATUS" == "✅" ]; then
+          # 2. Detailed Coverage Table (ONLY if everything passed)
+          if [ "$STATUS_COV" == "✅" ]; then
             echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
             grep "^TOTAL" "$OUTPUT_FILE" | awk '{ printf "| Regions | %s | %s | %s |\n| Functions | %s | %s | %s |\n| Lines | %s | %s | %s |\n| Branches | %s | %s | %s |\n", $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' >> "$COMMENT_FILE"
+            echo "" >> "$COMMENT_FILE"
           fi
 
-          # Test Failure / Logs Section
-          echo "" >> "$COMMENT_FILE"
+          # 3. Logs (Collapsible)
           echo "<details>" >> "$COMMENT_FILE"
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "<summary>🔴 <strong>Click to view Failure Logs</strong></summary>" >> "$COMMENT_FILE"
-          else
-            echo "<summary>🟢 <strong>Click to view Test Success Logs</strong></summary>" >> "$COMMENT_FILE"
-          fi
 
-          echo "" >> "$COMMENT_FILE"
-          echo '```text' >> "$COMMENT_FILE"
-
-          # If it failed, show the last 100 lines (often most relevant). If success, filter nicely.
-          if [ $EXIT_CODE -ne 0 ]; then
-            tail -n 100 "$OUTPUT_FILE" >> "$COMMENT_FILE"
-          else
-            # Remove filenames table from raw output to verify tests
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "<summary>🟢 <strong>Click to view Test Logs</strong></summary>" >> "$COMMENT_FILE"
+            echo "" >> "$COMMENT_FILE"
+            echo '```text' >> "$COMMENT_FILE"
+            # Clean up the log for success (remove file table to keep it short)
             sed '/^Filename/,$d' "$OUTPUT_FILE" >> "$COMMENT_FILE"
+          else
+            echo "<summary>🔴 <strong>Click to view Failure Logs</strong></summary>" >> "$COMMENT_FILE"
+            echo "" >> "$COMMENT_FILE"
+            echo '```text' >> "$COMMENT_FILE"
+            # Show the last 100 lines so the error is likely visible at the bottom
+            tail -n 100 "$OUTPUT_FILE" >> "$COMMENT_FILE"
           fi
 
           echo '```' >> "$COMMENT_FILE"
           echo "</details>" >> "$COMMENT_FILE"
 
-          # 5. CI CONCLUSION
-          # ----------------
-          # Force the step to fail if the original cargo command failed, 
-          # but ONLY AFTER generating the report.
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "Error: Cargo command failed with exit code $EXIT_CODE"
-            # We exit with success here inside the generation block so the *next* step (commenting) runs.
-            # We will propagate the failure in a later logic or let the job stay green but the comment show red.
-            # BETTER APPROACH: Write exit code to a file or env var to fail later.
-            echo "failure" > run_status
-          else
-            echo "success" > run_status
-          fi
+          # --- EXIT HANDLING ---
+          # We saved the exit code earlier. Now we write it to a file to check it in the next step.
+          # We DO NOT exit here, because we want the "Comment coverage" step to run even if tests failed.
+          echo "$EXIT_CODE" > exit_code.txt
 
-      # Only Ubuntu posts the comment
       - name: Comment coverage
         if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
@@ -154,12 +150,10 @@ jobs:
           header: code-coverage
           path: coverage.txt
 
-      # Final step: Fail the job if the tests failed.
-      # This ensures the PR check turns Red ❌ even though we handled the error earlier to post the comment.
       - name: Check Run Status
-        if: steps.measure_coverage.outcome != 'skipped'
         run: |
-          if [ -f run_status ] && grep -q "failure" run_status; then
-            echo "Tests or Compilation failed. Failing the job."
-            exit 1
+          EXIT_CODE=$(cat exit_code.txt)
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "Workflow failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
           fi
