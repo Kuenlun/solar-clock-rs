@@ -71,6 +71,7 @@ jobs:
         run: |
           # --- CONFIGURATION ---
           OUTPUT_FILE="coverage.raw"
+          JSON_FILE="coverage.json"
           COMMENT_FILE="coverage.txt"
 
           # Initialize default statuses (Assuming worst case or skipped)
@@ -82,15 +83,30 @@ jobs:
           # We disable 'exit on error' (set +e) to handle the failure manually
           set +e
 
-          # Run cargo llvm-cov. 
+          # Run cargo llvm-cov with JSON output for reliable parsing.
           # We redirect stderr to stdout (2>&1) to capture compiler errors in the same file.
-          cargo llvm-cov --all-features --workspace --color never > "$OUTPUT_FILE" 2>&1
+          cargo llvm-cov --all-features --workspace --color never --json > "$JSON_FILE" 2>&1
           EXIT_CODE=$?
+
+          # Also capture human-readable output for logs (only if successful)
+          # Note: Running llvm-cov twice is intentional - we need both structured JSON for parsing
+          # and human-readable text for displaying in the collapsible log section.
+          if [ $EXIT_CODE -eq 0 ]; then
+            cargo llvm-cov --all-features --workspace --color never > "$OUTPUT_FILE" 2>&1 || true
+          else
+            # If JSON generation failed, capture the error output
+            cp "$JSON_FILE" "$OUTPUT_FILE"
+          fi
 
           # Re-enable 'exit on error'
           set -e
 
           # --- LOGIC ANALYSIS ---
+
+          # Extract JSON data once for reuse throughout the script
+          # cargo-llvm-cov outputs info messages followed by a single JSON line
+          # We use grep to find and extract the line containing the JSON object
+          JSON_DATA=$(grep -o '^{.*}$' "$JSON_FILE" 2>/dev/null || echo "")
 
           # Scenario 1: Everything passed
           if [ $EXIT_CODE -eq 0 ]; then
@@ -98,12 +114,18 @@ jobs:
             STATUS_TEST="✅"
             STATUS_COV="✅" # Will display info icon or percentage later
           else
-            # Scenario 2: A failure occurred (build or tests).
-            # We rely solely on the exit code and do not parse textual output,
-            # to avoid fragile heuristics that depend on cargo's output format.
-            STATUS_BUILD="❌"
-            STATUS_TEST="❌"
-            STATUS_COV="⛔" # Coverage is irrelevant if build or tests fail
+            # Scenario 2: Failure occurred. Was it Build or Tests?
+            # Check if we extracted valid JSON (indicates compilation succeeded)
+            if [ -n "$JSON_DATA" ] && echo "$JSON_DATA" | jq -e '.type == "llvm.coverage.json.export"' >/dev/null 2>&1; then
+              STATUS_BUILD="✅"
+              STATUS_TEST="❌"
+              STATUS_COV="⛔" # Coverage is irrelevant if tests fail
+            else
+              # Scenario 3: Compilation failed (no valid JSON output)
+              STATUS_BUILD="❌"
+              STATUS_TEST="⛔"
+              STATUS_COV="⛔"
+            fi
           fi
 
           # --- REPORT GENERATION ---
@@ -132,8 +154,12 @@ jobs:
 
           # Coverage Row (Summary)
           if [ "$STATUS_COV" = "✅" ]; then
-             # Extract total coverage percentage by matching percentage-like fields instead of relying on a fixed column
-             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]+%$/) last = $i; } END { if (last != "") print last; }' || echo "N/A")
+             # Extract total coverage percentage from JSON using jq (more reliable than awk)
+             COV_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent' 2>/dev/null || echo "N/A")
+             if [ "$COV_PERCENT" != "N/A" ]; then
+               # Format as percentage
+               COV_PERCENT="${COV_PERCENT}%"
+             fi
              echo "| **Coverage** | ℹ️ | **$COV_PERCENT** |" >> "$COMMENT_FILE"
           else
              echo "| **Coverage** | ⛔ | Skipped |" >> "$COMMENT_FILE"
@@ -146,39 +172,32 @@ jobs:
             echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
-            COV_TABLE=$(awk '
-              /^TOTAL/ {
-                # Find sequences like: <total> <missed> <percent%>
-                for (i = 1; i <= NF - 2; i++) {
-                  if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^[0-9]+$/ && $(i+2) ~ /^[0-9.]+%$/) {
-                    triplet_idx++;
-                    total[triplet_idx]  = $i;
-                    missed[triplet_idx] = $(i+1);
-                    cov[triplet_idx]    = $(i+2);
-                    i += 2;
-                  }
-                }
-              }
-              END {
-                # Only print rows if we found at least one triplet; expect up to 4 (Regions, Functions, Lines, Branches)
-                if (triplet_idx >= 1) {
-                  printf "| Regions | %s | %s | %s |\n",   total[1], missed[1], cov[1];
-                }
-                if (triplet_idx >= 2) {
-                  printf "| Functions | %s | %s | %s |\n", total[2], missed[2], cov[2];
-                }
-                if (triplet_idx >= 3) {
-                  printf "| Lines | %s | %s | %s |\n",     total[3], missed[3], cov[3];
-                }
-                if (triplet_idx >= 4) {
-                  printf "| Branches | %s | %s | %s |\n",  total[4], missed[4], cov[4];
-                }
-              }' "$OUTPUT_FILE")
-            if [ -n "$COV_TABLE" ]; then
-              printf "%s\n" "$COV_TABLE" >> "$COMMENT_FILE"
-            else
-              echo "| _Coverage details unavailable: unexpected TOTAL line format_ |" >> "$COMMENT_FILE"
-            fi
+            
+            # Use jq to parse JSON and extract coverage metrics reliably
+            REGIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.count')
+            REGIONS_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.notcovered')
+            REGIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.percent')
+            
+            FUNCTIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count')
+            FUNCTIONS_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.covered')
+            # Use jq for arithmetic to ensure correct handling of integer vs float values
+            FUNCTIONS_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count - .data[0].totals.functions.covered')
+            FUNCTIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.percent')
+            
+            LINES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count')
+            LINES_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.covered')
+            # Use jq for arithmetic to ensure correct handling of integer vs float values
+            LINES_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count - .data[0].totals.lines.covered')
+            LINES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent')
+            
+            BRANCHES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.count')
+            BRANCHES_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.notcovered')
+            BRANCHES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.percent')
+            
+            echo "| Regions | $REGIONS_TOTAL | $REGIONS_MISSED | ${REGIONS_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "| Functions | $FUNCTIONS_TOTAL | $FUNCTIONS_MISSED | ${FUNCTIONS_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "| Lines | $LINES_TOTAL | $LINES_MISSED | ${LINES_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "| Branches | $BRANCHES_TOTAL | $BRANCHES_MISSED | ${BRANCHES_PERCENT}% |" >> "$COMMENT_FILE"
             echo "" >> "$COMMENT_FILE"
           fi
 
