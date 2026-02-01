@@ -20,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check Rust license headers
+        shell: bash
         run: |
           set -euo pipefail
           LICENSE_FILE=".github/license_header.rs"
