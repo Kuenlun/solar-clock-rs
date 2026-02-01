@@ -196,8 +196,12 @@ jobs:
       - name: Check Run Status
         shell: bash
         run: |
+          if [ ! -f exit_code.txt ]; then
+            echo "Error: exit_code.txt not found"
+            exit 1
+          fi
           if [ ! -s exit_code.txt ]; then
-            echo "Error: exit_code.txt not found or is empty"
+            echo "Error: exit_code.txt is empty"
             exit 1
           fi
           EXIT_CODE=$(cat exit_code.txt)
