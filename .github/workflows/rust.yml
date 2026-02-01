@@ -37,13 +37,27 @@ jobs:
             echo "✅ All files have the correct license header."
           fi
 
-  coverage:
-    name: Coverage on ${{ matrix.os }}
+  build-and-test:
+    name: Build and Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --all-features --workspace
+
+      - name: Test
+        run: cargo test --all-features --workspace
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -167,7 +181,7 @@ jobs:
           echo "$EXIT_CODE" > exit_code.txt
 
       - name: Comment coverage
-        if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: code-coverage
@@ -183,11 +197,11 @@ jobs:
           fi
 
   # This job acts as a "final gate" for branch protection rules.
-  # It will only run if the 'coverage' job (and its entire matrix) completes successfully.
+  # It will only run if all required jobs complete successfully.
   # In GitHub, you configure this job ("All Checks Passed") as the only required status check.
   all-checks-passed:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [coverage, license-check]
+    needs: [build-and-test, coverage, license-check]
     steps:
       - run: echo "All jobs passed successfully!"
