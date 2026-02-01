@@ -139,7 +139,7 @@ jobs:
           # Coverage Row (Summary)
           if [ "$STATUS_COV" == "✅" ]; then
              # Extract total coverage percentage by matching percentage-like fields instead of relying on a fixed column
-             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]\+%$/) last = $i; } END { if (last != "") print last; }' || echo "N/A")
+             COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]+%$/) last = $i; } END { if (last != "") print last; }' || echo "N/A")
              echo "| **Coverage** | ℹ️ | **$COV_PERCENT** |" >> "$COMMENT_FILE"
           else
              echo "| **Coverage** | ⛔ | Skipped |" >> "$COMMENT_FILE"
