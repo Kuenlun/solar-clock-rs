@@ -98,18 +98,12 @@ jobs:
             STATUS_TEST="✅"
             STATUS_COV="✅" # Will display info icon or percentage later
           else
-            # Scenario 2: Failure occurred. Was it Build or Tests?
-            # If the output contains "test result:", it means compilation finished and tests ran (but failed).
-            if grep -q "test result:" "$OUTPUT_FILE"; then
-              STATUS_BUILD="✅"
-              STATUS_TEST="❌"
-              STATUS_COV="⛔" # Coverage is irrelevant if tests fail
-            else
-              # Scenario 3: Compilation failed (no test result line found)
-              STATUS_BUILD="❌"
-              STATUS_TEST="⛔"
-              STATUS_COV="⛔"
-            fi
+            # Scenario 2: A failure occurred (build or tests).
+            # We rely solely on the exit code and do not parse textual output,
+            # to avoid fragile heuristics that depend on cargo's output format.
+            STATUS_BUILD="❌"
+            STATUS_TEST="❌"
+            STATUS_COV="⛔" # Coverage is irrelevant if build or tests fail
           fi
 
           # --- REPORT GENERATION ---
