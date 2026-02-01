@@ -1,0 +1,33 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Coverage on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Smart caching for Rust. Drastically reduces CI time.
+      - uses: swatinem/rust-cache@v2
+
+      # Installs cargo-llvm-cov and automatically handles llvm-tools-preview.
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      # --workspace: tests all crates in the repo
+      # --all-features: tests code behind feature flags
+      - name: Measure coverage
+        run: cargo llvm-cov --all-features --workspace --verbose
