@@ -1,0 +1,30 @@
+### 🦀 Rust CI Report
+| Category | Status | Details |
+|:---|:---:|:---|
+| **Compilation** | ✅ | Success |
+| **Tests** | ✅ | All tests passed |
+| **Coverage** | ℹ️ | **0%** |
+
+#### 📊 Coverage Breakdown
+| Type | Total | Missed | Coverage |
+|:---|:---:|:---:|:---:|
+| Regions | 92 | 92 | 0% |
+| Functions | 3 | 3 | 0% |
+| Lines | 62 | 62 | 0% |
+| Branches | 0 | 0 | 0% |
+
+<details>
+<summary>🟢 <strong>Click to view Test Logs</strong></summary>
+
+```text
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling solar-clock-rs v0.1.0 (/home/runner/work/solar-clock-rs/solar-clock-rs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/solar_clock_rs-3f263ed1fca9b1eb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+```
+</details>

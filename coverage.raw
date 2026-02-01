@@ -1,0 +1,14 @@
+info: cargo-llvm-cov currently setting cfg(coverage); you can opt-out it by passing --no-cfg-coverage
+   Compiling solar-clock-rs v0.1.0 (/home/runner/work/solar-clock-rs/solar-clock-rs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/main.rs (target/llvm-cov-target/debug/deps/solar_clock_rs-3f263ed1fca9b1eb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Filename                                                        Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+/home/runner/work/solar-clock-rs/solar-clock-rs/src/main.rs          92                92     0.00%           3                 3     0.00%          62                62     0.00%           0                 0         -
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                92                92     0.00%           3                 3     0.00%          62                62     0.00%           0                 0         -
