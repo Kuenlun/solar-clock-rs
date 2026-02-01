@@ -89,6 +89,8 @@ jobs:
           EXIT_CODE=$?
 
           # Also capture human-readable output for logs (only if successful)
+          # Note: Running llvm-cov twice is intentional - we need both structured JSON for parsing
+          # and human-readable text for displaying in the collapsible log section.
           if [ $EXIT_CODE -eq 0 ]; then
             cargo llvm-cov --all-features --workspace --color never > "$OUTPUT_FILE" 2>&1 || true
           else
@@ -101,6 +103,11 @@ jobs:
 
           # --- LOGIC ANALYSIS ---
 
+          # Extract JSON data once for reuse throughout the script
+          # cargo-llvm-cov outputs info messages followed by the JSON on the last line
+          # We use grep to robustly extract the line starting with { to handle any output format changes
+          JSON_DATA=$(grep -o '^{.*}$' "$JSON_FILE" 2>/dev/null || echo "")
+
           # Scenario 1: Everything passed
           if [ $EXIT_CODE -eq 0 ]; then
             STATUS_BUILD="✅"
@@ -108,9 +115,8 @@ jobs:
             STATUS_COV="✅" # Will display info icon or percentage later
           else
             # Scenario 2: Failure occurred. Was it Build or Tests?
-            # Check if JSON file contains valid JSON structure (indicates compilation succeeded)
-            # The JSON output is on the last line, so we check that
-            if tail -1 "$JSON_FILE" | jq -e '.type == "llvm.coverage.json.export"' >/dev/null 2>&1; then
+            # Check if we extracted valid JSON (indicates compilation succeeded)
+            if [ -n "$JSON_DATA" ] && echo "$JSON_DATA" | jq -e '.type == "llvm.coverage.json.export"' >/dev/null 2>&1; then
               STATUS_BUILD="✅"
               STATUS_TEST="❌"
               STATUS_COV="⛔" # Coverage is irrelevant if tests fail
@@ -149,8 +155,7 @@ jobs:
           # Coverage Row (Summary)
           if [ "$STATUS_COV" == "✅" ]; then
              # Extract total coverage percentage from JSON using jq (more reliable than awk)
-             # The JSON is on the last line of the output file
-             COV_PERCENT=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.lines.percent' 2>/dev/null || echo "N/A")
+             COV_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent' 2>/dev/null || echo "N/A")
              if [ "$COV_PERCENT" != "N/A" ]; then
                # Format as percentage
                COV_PERCENT="${COV_PERCENT}%"
@@ -167,9 +172,6 @@ jobs:
             echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
-            
-            # Extract JSON once for reuse (avoids repeated tail+jq calls)
-            JSON_DATA=$(tail -1 "$JSON_FILE")
             
             # Use jq to parse JSON and extract coverage metrics reliably
             REGIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.count')
