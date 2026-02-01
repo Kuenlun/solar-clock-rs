@@ -6,4 +6,4 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 spa = "0.5.1"
-chrono = "0.4.43"
+chrono = "^0.4.43"
