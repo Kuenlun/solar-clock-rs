@@ -151,6 +151,7 @@ jobs:
           path: coverage.txt
 
       - name: Check Run Status
+        shell: bash
         run: |
           EXIT_CODE=$(cat exit_code.txt)
           if [ "$EXIT_CODE" -ne 0 ]; then
