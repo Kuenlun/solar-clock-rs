@@ -168,25 +168,29 @@ jobs:
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
             
+            # Extract JSON once for reuse (avoids repeated tail+jq calls)
+            JSON_DATA=$(tail -1 "$JSON_FILE")
+            
             # Use jq to parse JSON and extract coverage metrics reliably
-            # The JSON is on the last line of the output file
-            REGIONS_TOTAL=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.regions.count')
-            REGIONS_MISSED=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.regions.notcovered')
-            REGIONS_PERCENT=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.regions.percent')
+            REGIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.count')
+            REGIONS_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.notcovered')
+            REGIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.percent')
             
-            FUNCTIONS_TOTAL=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.functions.count')
-            FUNCTIONS_COVERED=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.functions.covered')
-            FUNCTIONS_MISSED=$((FUNCTIONS_TOTAL - FUNCTIONS_COVERED))
-            FUNCTIONS_PERCENT=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.functions.percent')
+            FUNCTIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count')
+            FUNCTIONS_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.covered')
+            # Use jq to calculate the difference to avoid shell arithmetic issues with non-numeric values
+            FUNCTIONS_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count - .data[0].totals.functions.covered')
+            FUNCTIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.percent')
             
-            LINES_TOTAL=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.lines.count')
-            LINES_COVERED=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.lines.covered')
-            LINES_MISSED=$((LINES_TOTAL - LINES_COVERED))
-            LINES_PERCENT=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.lines.percent')
+            LINES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count')
+            LINES_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.covered')
+            # Use jq to calculate the difference to avoid shell arithmetic issues with non-numeric values
+            LINES_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count - .data[0].totals.lines.covered')
+            LINES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent')
             
-            BRANCHES_TOTAL=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.branches.count')
-            BRANCHES_MISSED=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.branches.notcovered')
-            BRANCHES_PERCENT=$(tail -1 "$JSON_FILE" | jq -r '.data[0].totals.branches.percent')
+            BRANCHES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.count')
+            BRANCHES_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.notcovered')
+            BRANCHES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.percent')
             
             echo "| Regions | $REGIONS_TOTAL | $REGIONS_MISSED | ${REGIONS_PERCENT}% |" >> "$COMMENT_FILE"
             echo "| Functions | $FUNCTIONS_TOTAL | $FUNCTIONS_MISSED | ${FUNCTIONS_PERCENT}% |" >> "$COMMENT_FILE"
