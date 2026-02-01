@@ -111,13 +111,16 @@ jobs:
             STATUS_COV="✅" # Will display info icon or percentage later
           else
             # Scenario 2: Failure occurred. Was it Build or Tests?
-            # Check if we extracted valid JSON (indicates compilation succeeded)
-            if [ -n "$JSON_DATA" ] && echo "$JSON_DATA" | jq -e '.type == "llvm.coverage.json.export"' >/dev/null 2>&1; then
+            # Check if we extracted valid and complete JSON (indicates compilation succeeded)
+            # We verify both the type field AND the presence of coverage data fields to ensure completeness
+            if [ -n "$JSON_DATA" ] && \
+               echo "$JSON_DATA" | jq -e '.type == "llvm.coverage.json.export"' >/dev/null 2>&1 && \
+               echo "$JSON_DATA" | jq -e 'has("data") and (.data | length > 0) and .data[0].totals' >/dev/null 2>&1; then
               STATUS_BUILD="✅"
               STATUS_TEST="❌"
               STATUS_COV="⛔" # Coverage is irrelevant if tests fail
             else
-              # Scenario 3: Compilation failed (no valid JSON output)
+              # Scenario 3: Compilation failed (no valid JSON output or incomplete coverage data)
               STATUS_BUILD="❌"
               STATUS_TEST="⛔"
               STATUS_COV="⛔"
