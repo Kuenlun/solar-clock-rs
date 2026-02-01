@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: [ "master" ]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
 
 permissions:
   contents: read
@@ -42,9 +42,25 @@ jobs:
           echo "### Code Coverage Summary" > coverage.txt
           echo "| Type | Total | Missed | Coverage |" >> coverage.txt
           echo "|:---|:---:|:---:|:---:|" >> coverage.txt
-          
+
           # Parse the TOTAL line and format it into a Markdown table
           grep "^TOTAL" coverage.raw | awk '{ printf "| Regions | %s | %s | %s |\n| Functions | %s | %s | %s |\n| Lines | %s | %s | %s |\n| Branches | %s | %s | %s |\n", $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' >> coverage.txt
+
+          # Add Test Summary
+          echo "" >> coverage.txt
+          echo "### Test Results" >> coverage.txt
+          grep "test result:" coverage.raw | sed 's/^/- /' >> coverage.txt || echo "- No test results found" >> coverage.txt
+
+          # Add Collapsible Detailed Test Output
+          echo "" >> coverage.txt
+          echo "<details>" >> coverage.txt
+          echo "<summary>Click to view all executed tests</summary>" >> coverage.txt
+          echo "" >> coverage.txt
+          echo '```text' >> coverage.txt
+          # Remove the coverage table (starting with Filename) from the output to show only test logs
+          sed '/^Filename/,$d' coverage.raw >> coverage.txt
+          echo '```' >> coverage.txt
+          echo "</details>" >> coverage.txt
 
       # Only Ubuntu posts the comment to avoid duplicate notifications on the PR
       - name: Comment coverage
