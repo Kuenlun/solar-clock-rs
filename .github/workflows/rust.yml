@@ -152,7 +152,34 @@ jobs:
             echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
-            grep "^TOTAL" "$OUTPUT_FILE" | awk '{ printf "| Regions | %s | %s | %s |\n| Functions | %s | %s | %s |\n| Lines | %s | %s | %s |\n| Branches | %s | %s | %s |\n", $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 }' >> "$COMMENT_FILE"
+            grep "^TOTAL" "$OUTPUT_FILE" | awk '{
+              triplet_idx = 0;
+              # Find sequences like: <total> <missed> <percent%>
+              for (i = 1; i <= NF - 2; i++) {
+                if ($i ~ /^[0-9]+$/ && $(i+1) ~ /^[0-9]+$/ && $(i+2) ~ /^[0-9.]+%$/) {
+                  triplet_idx++;
+                  total[triplet_idx]  = $i;
+                  missed[triplet_idx] = $(i+1);
+                  cov[triplet_idx]    = $(i+2);
+                  i += 2;
+                }
+              }
+            }
+            END {
+              # Only print rows if we found at least one triplet; expect up to 4 (Regions, Functions, Lines, Branches)
+              if (triplet_idx >= 1) {
+                printf "| Regions | %s | %s | %s |\n",   total[1], missed[1], cov[1];
+              }
+              if (triplet_idx >= 2) {
+                printf "| Functions | %s | %s | %s |\n", total[2], missed[2], cov[2];
+              }
+              if (triplet_idx >= 3) {
+                printf "| Lines | %s | %s | %s |\n",     total[3], missed[3], cov[3];
+              }
+              if (triplet_idx >= 4) {
+                printf "| Branches | %s | %s | %s |\n",  total[4], missed[4], cov[4];
+              }
+            }' >> "$COMMENT_FILE"
             echo "" >> "$COMMENT_FILE"
           fi
 
