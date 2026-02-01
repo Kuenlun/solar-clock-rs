@@ -137,23 +137,23 @@ jobs:
           echo "|:---|:---:|:---|" >> "$COMMENT_FILE"
 
           # Build Row
-          if [ "$STATUS_BUILD" == "✅" ]; then
+          if [ "$STATUS_BUILD" = "✅" ]; then
              echo "| **Compilation** | ✅ | Success |" >> "$COMMENT_FILE"
           else
              echo "| **Compilation** | ❌ | **Failed** |" >> "$COMMENT_FILE"
           fi
 
           # Test Row
-          if [ "$STATUS_TEST" == "✅" ]; then
+          if [ "$STATUS_TEST" = "✅" ]; then
              echo "| **Tests** | ✅ | All tests passed |" >> "$COMMENT_FILE"
-          elif [ "$STATUS_TEST" == "❌" ]; then
+          elif [ "$STATUS_TEST" = "❌" ]; then
              echo "| **Tests** | ❌ | **Some tests failed** |" >> "$COMMENT_FILE"
           else
              echo "| **Tests** | ⛔ | Skipped (Build failed) |" >> "$COMMENT_FILE"
           fi
 
           # Coverage Row (Summary)
-          if [ "$STATUS_COV" == "✅" ]; then
+          if [ "$STATUS_COV" = "✅" ]; then
              # Extract total coverage percentage from JSON using jq (more reliable than awk)
              COV_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent' 2>/dev/null || echo "N/A")
              if [ "$COV_PERCENT" != "N/A" ]; then
@@ -168,7 +168,7 @@ jobs:
           echo "" >> "$COMMENT_FILE"
 
           # 2. Detailed Coverage Table (ONLY if everything passed)
-          if [ "$STATUS_COV" == "✅" ]; then
+          if [ "$STATUS_COV" = "✅" ]; then
             echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
