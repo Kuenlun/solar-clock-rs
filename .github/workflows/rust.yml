@@ -71,7 +71,6 @@ jobs:
           # --- CONFIGURATION ---
           OUTPUT_FILE="coverage.raw"
           JSON_FILE="coverage.json"
-          JSON_FILE="coverage.json"
           COMMENT_FILE="coverage.txt"
 
           # Initialize default statuses (Assuming worst case or skipped)
