@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "master" ]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -20,14 +24,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      # Smart caching for Rust. Drastically reduces CI time.
       - uses: swatinem/rust-cache@v2
-
-      # Installs cargo-llvm-cov and automatically handles llvm-tools-preview.
       - uses: taiki-e/install-action@cargo-llvm-cov
 
-      # --workspace: tests all crates in the repo
-      # --all-features: tests code behind feature flags
+      # Use 'shell: bash' to ensure compatibility with pipes/redirection on Windows
       - name: Measure coverage
-        run: cargo llvm-cov --all-features --workspace --verbose
+        shell: bash
+        run: |
+          # Run tests and collect coverage.
+          # --color never: Prevents ANSI color codes in the output file.
+          # tee coverage.txt: Prints to stdout (for logs) AND saves to file (for comment).
+          cargo llvm-cov --all-features --workspace --verbose --color never | tee coverage.txt
+
+      # Only Ubuntu posts the comment to avoid duplicate notifications on the PR
+      - name: Comment coverage
+        if: matrix.os == 'ubuntu-latest' && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: code-coverage
+          path: coverage.txt
