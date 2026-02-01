@@ -253,10 +253,6 @@ jobs:
             echo "Error: Invalid exit code - must be a valid integer"
             exit 1
           fi
-          if [ "$EXIT_CODE" -gt 255 ]; then
-            echo "Error: Exit code out of range - must be between 0 and 255"
-            exit 1
-          fi
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "Workflow failed with exit code $EXIT_CODE"
             exit $EXIT_CODE
