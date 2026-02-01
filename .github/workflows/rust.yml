@@ -121,23 +121,23 @@ jobs:
           echo "|:---|:---:|:---|" >> "$COMMENT_FILE"
 
           # Build Row
-          if [ "$STATUS_BUILD" == "✅" ]; then
+          if [ "$STATUS_BUILD" = "✅" ]; then
              echo "| **Compilation** | ✅ | Success |" >> "$COMMENT_FILE"
           else
              echo "| **Compilation** | ❌ | **Failed** |" >> "$COMMENT_FILE"
           fi
 
           # Test Row
-          if [ "$STATUS_TEST" == "✅" ]; then
+          if [ "$STATUS_TEST" = "✅" ]; then
              echo "| **Tests** | ✅ | All tests passed |" >> "$COMMENT_FILE"
-          elif [ "$STATUS_TEST" == "❌" ]; then
+          elif [ "$STATUS_TEST" = "❌" ]; then
              echo "| **Tests** | ❌ | **Some tests failed** |" >> "$COMMENT_FILE"
           else
              echo "| **Tests** | ⛔ | Skipped (Build failed) |" >> "$COMMENT_FILE"
           fi
 
           # Coverage Row (Summary)
-          if [ "$STATUS_COV" == "✅" ]; then
+          if [ "$STATUS_COV" = "✅" ]; then
              # Extract total coverage percentage by matching percentage-like fields instead of relying on a fixed column
              COV_PERCENT=$(grep "^TOTAL" "$OUTPUT_FILE" | awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9.]+%$/) last = $i; } END { if (last != "") print last; }' || echo "N/A")
              echo "| **Coverage** | ℹ️ | **$COV_PERCENT** |" >> "$COMMENT_FILE"
@@ -148,7 +148,7 @@ jobs:
           echo "" >> "$COMMENT_FILE"
 
           # 2. Detailed Coverage Table (ONLY if everything passed)
-          if [ "$STATUS_COV" == "✅" ]; then
+          if [ "$STATUS_COV" = "✅" ]; then
             echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
             echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
             echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
