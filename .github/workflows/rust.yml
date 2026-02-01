@@ -104,8 +104,8 @@ jobs:
           # --- LOGIC ANALYSIS ---
 
           # Extract JSON data once for reuse throughout the script
-          # cargo-llvm-cov outputs info messages followed by the JSON on the last line
-          # We use grep to robustly extract the line starting with { to handle any output format changes
+          # cargo-llvm-cov outputs info messages followed by a single JSON line
+          # We use grep to find and extract the line containing the JSON object
           JSON_DATA=$(grep -o '^{.*}$' "$JSON_FILE" 2>/dev/null || echo "")
 
           # Scenario 1: Everything passed
@@ -180,13 +180,13 @@ jobs:
             
             FUNCTIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count')
             FUNCTIONS_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.covered')
-            # Use jq to calculate the difference to avoid shell arithmetic issues with non-numeric values
+            # Use jq for arithmetic to ensure correct handling of integer vs float values
             FUNCTIONS_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count - .data[0].totals.functions.covered')
             FUNCTIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.percent')
             
             LINES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count')
             LINES_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.covered')
-            # Use jq to calculate the difference to avoid shell arithmetic issues with non-numeric values
+            # Use jq for arithmetic to ensure correct handling of integer vs float values
             LINES_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count - .data[0].totals.lines.covered')
             LINES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent')
             
