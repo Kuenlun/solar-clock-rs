@@ -37,6 +37,14 @@ jobs:
             echo "✅ All files have the correct license header."
           fi
 
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
   build-and-test:
     name: Build and Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -264,6 +272,6 @@ jobs:
   all-checks-passed:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [build-and-test, coverage, license-check]
+    needs: [build-and-test, coverage, license-check, fmt]
     steps:
       - run: echo "All jobs passed successfully!"
