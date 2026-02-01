@@ -1,0 +1,277 @@
+name: Rust
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  license-check:
+    name: Check License Headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Rust license headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          LICENSE_FILE=".github/license_header.rs"
+          MISSING=0
+          while IFS= read -r file; do
+            if ! head -n "$(wc -l < "$LICENSE_FILE")" "$file" | diff -u "$LICENSE_FILE" - > /dev/null; then
+              echo "❌ Missing or incorrect license in: $file"
+              MISSING=1
+            fi
+          done < <(find src/ -name "*.rs")
+          if [ $MISSING -eq 1 ]; then
+            echo "Some files are missing the correct license header."
+            exit 1
+          else
+            echo "✅ All files have the correct license header."
+          fi
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+
+  build-and-test:
+    name: Build and Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --all-features --workspace
+
+      - name: Test
+        run: cargo test --all-features --workspace
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Measure coverage
+        shell: bash
+        run: |
+          # --- CONFIGURATION ---
+          OUTPUT_FILE="coverage.raw"
+          JSON_FILE="coverage.json"
+          COMMENT_FILE="coverage.txt"
+
+          # Initialize default statuses (Assuming worst case or skipped)
+          STATUS_BUILD="❌"
+          STATUS_TEST="⛔" # Defaults to skipped/blocked
+          STATUS_COV="⛔"  # Defaults to skipped/blocked
+
+          # --- EXECUTION ---
+          # We disable 'exit on error' (set +e) to handle the failure manually
+          set +e
+
+          # Run cargo llvm-cov once with JSON output for reliable parsing.
+          # We redirect stderr to stdout (2>&1) to capture compiler errors in the same file.
+          # The combined output is used both as human-readable logs and as the source for JSON extraction.
+          cargo llvm-cov --all-features --workspace --color never --json > "$OUTPUT_FILE" 2>&1
+          EXIT_CODE=$?
+
+          # Mirror the captured output into the JSON file so downstream parsing remains unchanged.
+          cp "$OUTPUT_FILE" "$JSON_FILE"
+
+          # Re-enable 'exit on error'
+          set -e
+
+          # --- LOGIC ANALYSIS ---
+
+          # Extract JSON data once for reuse throughout the script.
+          # cargo-llvm-cov may output log/info lines along with the JSON; we read the entire
+          # file as a raw string and use jq to capture the first JSON object, even if it is
+          # formatted across multiple lines.
+          JSON_DATA=$(jq -Rs 'capture("(?s)\\{.*\\}") | .string' "$JSON_FILE" 2>/dev/null || echo "")
+
+          # Scenario 1: Everything passed
+          if [ $EXIT_CODE -eq 0 ]; then
+            STATUS_BUILD="✅"
+            STATUS_TEST="✅"
+            STATUS_COV="✅" # Will display info icon or percentage later
+          else
+            # Scenario 2: Failure occurred. Was it Build or Tests?
+            # Check if we extracted valid and complete JSON (indicates compilation succeeded)
+            # We verify both the type field AND the presence of coverage data fields to ensure completeness
+            if [ -n "$JSON_DATA" ] && \
+               echo "$JSON_DATA" | jq -e '.type == "llvm.coverage.json.export"' >/dev/null 2>&1 && \
+               echo "$JSON_DATA" | jq -e 'has("data") and (.data | length > 0) and .data[0].totals' >/dev/null 2>&1; then
+              STATUS_BUILD="✅"
+              STATUS_TEST="❌"
+              STATUS_COV="⛔" # Coverage is irrelevant if tests fail
+            else
+              # Scenario 3: Compilation failed (no valid JSON output or incomplete coverage data)
+              STATUS_BUILD="❌"
+              STATUS_TEST="⛔"
+              STATUS_COV="⛔"
+            fi
+          fi
+
+          # --- REPORT GENERATION ---
+
+          echo "### 🦀 Rust CI Report" > "$COMMENT_FILE"
+
+          # 1. Summary Table
+          echo "| Category | Status | Details |" >> "$COMMENT_FILE"
+          echo "|:---|:---:|:---|" >> "$COMMENT_FILE"
+
+          # Build Row
+          if [ "$STATUS_BUILD" = "✅" ]; then
+             echo "| **Compilation** | ✅ | Success |" >> "$COMMENT_FILE"
+          else
+             echo "| **Compilation** | ❌ | **Failed** |" >> "$COMMENT_FILE"
+          fi
+
+          # Test Row
+          if [ "$STATUS_TEST" = "✅" ]; then
+             echo "| **Tests** | ✅ | All tests passed |" >> "$COMMENT_FILE"
+          elif [ "$STATUS_TEST" = "❌" ]; then
+             echo "| **Tests** | ❌ | **Some tests failed** |" >> "$COMMENT_FILE"
+          else
+             echo "| **Tests** | ⛔ | Skipped (Build failed) |" >> "$COMMENT_FILE"
+          fi
+
+          # Coverage Row (Summary)
+          if [ "$STATUS_COV" = "✅" ]; then
+             # Extract total coverage percentage from JSON using jq (more reliable than awk)
+             COV_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent // 0' 2>/dev/null || echo "N/A")
+             if [ "$COV_PERCENT" != "N/A" ]; then
+               # Format as percentage
+               COV_PERCENT="${COV_PERCENT}%"
+             fi
+             echo "| **Coverage** | ℹ️ | **$COV_PERCENT** |" >> "$COMMENT_FILE"
+          else
+             echo "| **Coverage** | ⛔ | Skipped |" >> "$COMMENT_FILE"
+          fi
+
+          echo "" >> "$COMMENT_FILE"
+
+          # 2. Detailed Coverage Table (ONLY if everything passed)
+          if [ "$STATUS_COV" = "✅" ] && echo "$JSON_DATA" | jq -e '.data[0].totals' >/dev/null 2>&1; then
+            echo "#### 📊 Coverage Breakdown" >> "$COMMENT_FILE"
+            echo "| Type | Total | Missed | Coverage |" >> "$COMMENT_FILE"
+            echo "|:---|:---:|:---:|:---:|" >> "$COMMENT_FILE"
+            
+            # Use jq to parse JSON and extract coverage metrics reliably, with safe fallbacks
+            REGIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.count // 0')
+            REGIONS_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.notcovered // 0')
+            REGIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.regions.percent // "N/A"')
+            
+            FUNCTIONS_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.count // 0')
+            FUNCTIONS_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.covered // 0')
+            # Use jq for arithmetic to ensure correct handling of integer vs float values, with safe fallbacks
+            FUNCTIONS_MISSED=$(echo "$JSON_DATA" | jq -r '(.data[0].totals.functions.count // 0) - (.data[0].totals.functions.covered // 0)')
+            FUNCTIONS_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.functions.percent // "N/A"')
+            
+            LINES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.count // 0')
+            LINES_COVERED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.covered // 0')
+            # Use jq for arithmetic to ensure correct handling of integer vs float values, with safe fallbacks
+            LINES_MISSED=$(echo "$JSON_DATA" | jq -r '(.data[0].totals.lines.count // 0) - (.data[0].totals.lines.covered // 0)')
+            LINES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.lines.percent // "N/A"')
+            
+            BRANCHES_TOTAL=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.count // 0')
+            BRANCHES_MISSED=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.notcovered // 0')
+            BRANCHES_PERCENT=$(echo "$JSON_DATA" | jq -r '.data[0].totals.branches.percent // "N/A"')
+            
+            echo "| Regions | $REGIONS_TOTAL | $REGIONS_MISSED | ${REGIONS_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "| Functions | $FUNCTIONS_TOTAL | $FUNCTIONS_MISSED | ${FUNCTIONS_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "| Lines | $LINES_TOTAL | $LINES_MISSED | ${LINES_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "| Branches | $BRANCHES_TOTAL | $BRANCHES_MISSED | ${BRANCHES_PERCENT}% |" >> "$COMMENT_FILE"
+            echo "" >> "$COMMENT_FILE"
+          fi
+
+          # 3. Logs (Collapsible)
+          echo "<details>" >> "$COMMENT_FILE"
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "<summary>🟢 <strong>Click to view Test Logs</strong></summary>" >> "$COMMENT_FILE"
+            echo "" >> "$COMMENT_FILE"
+            echo '```text' >> "$COMMENT_FILE"
+            # Clean up the log for success (remove file table to keep it short)
+            # If the expected llvm-cov table header (e.g. "Filename  Regions  Missed ...") exists, strip from there; otherwise, fall back to last 100 lines
+            if grep -q '^Filename[[:space:]]\+Regions[[:space:]]\+Missed' "$OUTPUT_FILE"; then
+              sed '/^Filename[[:space:]]\+Regions[[:space:]]\+Missed/,$d' "$OUTPUT_FILE" >> "$COMMENT_FILE"
+            else
+              tail -n 100 "$OUTPUT_FILE" >> "$COMMENT_FILE"
+            fi
+          else
+            echo "<summary>🔴 <strong>Click to view Failure Logs</strong></summary>" >> "$COMMENT_FILE"
+            echo "" >> "$COMMENT_FILE"
+            echo '```text' >> "$COMMENT_FILE"
+            # Show the last 100 lines so the error is likely visible at the bottom
+            tail -n 100 "$OUTPUT_FILE" >> "$COMMENT_FILE"
+          fi
+
+          echo '```' >> "$COMMENT_FILE"
+          echo "</details>" >> "$COMMENT_FILE"
+
+          # --- EXIT HANDLING ---
+          # We saved the exit code earlier. Now we write it to a file to check it in the next step.
+          # We DO NOT exit here, because we want the "Comment coverage" step to run even if tests failed.
+          echo "$EXIT_CODE" > exit_code.txt
+
+      - name: Comment coverage
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: code-coverage
+          path: coverage.txt
+
+      - name: Check Run Status
+        shell: bash
+        run: |
+          if [ ! -f exit_code.txt ]; then
+            echo "Error: exit_code.txt not found"
+            exit 1
+          fi
+          if [ ! -s exit_code.txt ]; then
+            echo "Error: exit_code.txt is empty"
+            exit 1
+          fi
+          EXIT_CODE=$(tr -d '[:space:]' < exit_code.txt)
+          if ! [[ "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
+            echo "Error: Invalid exit code - must be a valid integer"
+            exit 1
+          fi
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "Workflow failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+  # This job acts as a "final gate" for branch protection rules.
+  # It will only run if all required jobs complete successfully.
+  # In GitHub, you configure this job ("All Checks Passed") as the only required status check.
+  all-checks-passed:
+    name: All Checks Passed
+    runs-on: ubuntu-latest
+    needs: [build-and-test, coverage, license-check, fmt]
+    steps:
+      - run: echo "All jobs passed successfully!"

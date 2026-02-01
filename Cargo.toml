@@ -2,7 +2,8 @@
 name = "solar-clock-rs"
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 spa = "0.5.1"
-chrono = "0.4"
+chrono = "0.4.43"
