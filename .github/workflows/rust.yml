@@ -14,6 +14,29 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  license-check:
+    name: Check License Headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Rust license headers
+        run: |
+          set -euo pipefail
+          LICENSE_FILE=".github/license_header.rs"
+          MISSING=0
+          while IFS= read -r file; do
+            if ! head -n "$(wc -l < "$LICENSE_FILE")" "$file" | diff -u - "$LICENSE_FILE"; then
+              echo "❌ Missing or incorrect license in: $file"
+              MISSING=1
+            fi
+          done < <(find src/ -name "*.rs")
+          if [ $MISSING -eq 1 ]; then
+            echo "Some files are missing the correct license header."
+            exit 1
+          else
+            echo "✅ All files have the correct license header."
+          fi
+
   coverage:
     name: Coverage on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -165,6 +188,6 @@ jobs:
   all-checks-passed:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [coverage]
+    needs: [coverage, license-check]
     steps:
       - run: echo "All jobs passed successfully!"
