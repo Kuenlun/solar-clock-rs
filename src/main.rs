@@ -1,5 +1,5 @@
 /*!
-solar-clock-rs - Rust CLI tool to visualize git branch flows
+solar-clock-rs - High-precision solar clock calculator
 Copyright (C) 2026  Juan Luis Leal Contreras (Kuenlun)
 
 This program is free software: you can redistribute it and/or modify
