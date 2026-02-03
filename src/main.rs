@@ -57,6 +57,14 @@ pub struct SolarTargets {
     pub sunset: NaiveTime,
 }
 
+#[derive(Debug, Clone)]
+pub struct SolarClockResult {
+    pub pchip_time: DateTime<FixedOffset>,
+    pub pchip_speed: f64,
+    pub linear_time: DateTime<FixedOffset>,
+    pub linear_speed: f64,
+}
+
 fn main() {
     // Test coordinates
     let targets = SolarTargets {
@@ -82,14 +90,23 @@ fn main() {
 }
 
 fn process_solar_clock(dt_input: DateTime<Local>, coordinates: Coordinates, targets: SolarTargets) {
-    if let Some((delta_seconds, dt_solar_final)) =
-        calculate_solar_clock(dt_input, coordinates, targets)
-    {
+    if let Some(result) = calculate_solar_clock(dt_input, coordinates, targets) {
         println!("\nInput Time (Local): {}", dt_input); // Show Local
-        println!("Delta (Model):      {:.3} seconds", delta_seconds);
+
+        // PCHIP Output
+        println!("--- PCHIP Interpolation ---");
+        println!("Solar Speed:        {:.6} s_solar/s_real", result.pchip_speed);
         println!(
             "Solar Clock Time:   {}",
-            dt_solar_final.format("%Y-%m-%d %H:%M:%S %z")
+            result.pchip_time.format("%Y-%m-%d %H:%M:%S %z")
+        );
+
+        // Linear Output
+        println!("--- Linear Interpolation ---");
+        println!("Solar Speed:        {:.6} s_solar/s_real", result.linear_speed);
+        println!(
+            "Solar Clock Time:   {}",
+            result.linear_time.format("%Y-%m-%d %H:%M:%S %z")
         );
     } else {
         println!("Insufficient solar data or interpolation failed.");
@@ -100,7 +117,7 @@ fn calculate_solar_clock(
     dt_input: DateTime<Local>,
     coordinates: Coordinates,
     targets: SolarTargets,
-) -> Option<(f64, DateTime<FixedOffset>)> {
+) -> Option<SolarClockResult> {
     // Convert Local Input to UTC for calculation
     let dt_input_utc = dt_input.with_timezone(&Utc);
 
@@ -125,6 +142,37 @@ fn calculate_solar_clock(
     let input_timestamp = dt_input_utc.timestamp() as f64
         + (dt_input_utc.timestamp_subsec_nanos() as f64 / 1_000_000_000.0);
 
+    // --- Linear Interpolation Calculation ---
+    // Find the interval [p1, p2] such that p1.x <= input <= p2.x
+    // points is sorted.
+    let mut linear_delta = 0.0;
+    let mut linear_speed = 1.0;
+
+    // We need at least 2 points to interpolate
+    if points.len() >= 2 {
+        // Find the index of the first point where point.x > input_timestamp
+        let idx = points.partition_point(|p| p.x <= input_timestamp);
+        
+        // If idx == 0, input is before all points (extrapolate using first segment)
+        // If idx == len, input is after all points (extrapolate using last segment)
+        // Otherwise, input is between points[idx-1] and points[idx]
+        
+        let (p0, p1) = if idx == 0 {
+             (points[0], points[1])
+        } else if idx >= points.len() {
+             (points[points.len() -2], points[points.len() - 1])
+        } else {
+             (points[idx - 1], points[idx])
+        };
+
+        // Linear Interp: y = y0 + (x - x0) * (y1 - y0) / (x1 - x0)
+        let slope = (p1.y - p0.y) / (p1.x - p0.x);
+        linear_delta = p0.y + (input_timestamp - p0.x) * slope;
+        
+        // Speed = 1 + dy/dx = 1 + slope
+        linear_speed = 1.0 + slope;
+    }
+
     // Attempt interpolation
     // Arg 4: extrapolate? assume false
     if let Ok(interpolator) =
@@ -133,21 +181,40 @@ fn calculate_solar_clock(
         // Trait method usually is 'interpolate' or 'eval'
         let delta_seconds = interpolator.evaluate(input_timestamp).unwrap_or(0.0);
 
+        // Calculate speed using centered difference derivative
+        // Speed = d(SolarTime)/dt = 1 + d(Delta)/dt
+        let h = 0.1; // Small step for numerical derivative
+        let d_plus = interpolator.evaluate(input_timestamp + h).unwrap_or(delta_seconds);
+        let d_minus = interpolator.evaluate(input_timestamp - h).unwrap_or(delta_seconds);
+        let delta_deriv = (d_plus - d_minus) / (2.0 * h);
+        let speed = 1.0 + delta_deriv;
+
         // 5. Calculate Output
         // Solar time timestamp = Input + Delta
 
-        let extra_seconds = delta_seconds as i64;
-        let extra_nanos = ((delta_seconds - extra_seconds as f64) * 1_000_000_000.0) as u32;
+        // Helper to apply delta
+        let apply_delta = |delta: f64| -> DateTime<FixedOffset> {
+            let extra_seconds = delta as i64;
+            let extra_nanos = ((delta - extra_seconds as f64) * 1_000_000_000.0) as u32;
 
-        let dt_solar_utc = dt_input_utc
-            .checked_add_signed(Duration::seconds(extra_seconds))
-            .and_then(|d| d.checked_add_signed(Duration::nanoseconds(extra_nanos as i64)))
-            .unwrap_or(dt_input_utc);
+            let dt_solar_utc = dt_input_utc
+                .checked_add_signed(Duration::seconds(extra_seconds))
+                .and_then(|d| d.checked_add_signed(Duration::nanoseconds(extra_nanos as i64)))
+                .unwrap_or(dt_input_utc);
 
-        let solar_tz = FixedOffset::east_opt(SOLAR_TIMEZONE_OFFSET).unwrap();
-        let dt_solar_final = dt_solar_utc.with_timezone(&solar_tz);
+            let solar_tz = FixedOffset::east_opt(SOLAR_TIMEZONE_OFFSET).unwrap();
+            dt_solar_utc.with_timezone(&solar_tz)
+        };
+        
+        let dt_pchip_final = apply_delta(delta_seconds);
+        let dt_linear_final = apply_delta(linear_delta);
 
-        return Some((delta_seconds, dt_solar_final));
+        return Some(SolarClockResult {
+            pchip_time: dt_pchip_final,
+            pchip_speed: speed,
+            linear_time: dt_linear_final,
+            linear_speed: linear_speed,
+        });
     }
 
     None
@@ -281,12 +348,17 @@ mod tests {
             .unwrap()
             .with_timezone(&Local);
 
-        let (_, solar_sunrise) = calculate_solar_clock(sunrise_input, coordinates, test_targets)
+        let result = calculate_solar_clock(sunrise_input, coordinates, test_targets)
             .expect("Sunrise calc failed");
-        let (_, solar_transit) = calculate_solar_clock(transit_input, coordinates, test_targets)
+        let solar_sunrise = result.pchip_time;
+
+        let result_transit = calculate_solar_clock(transit_input, coordinates, test_targets)
             .expect("Transit calc failed");
-        let (_, solar_sunset) = calculate_solar_clock(sunset_input, coordinates, test_targets)
+        let solar_transit = result_transit.pchip_time;
+
+        let result_sunset = calculate_solar_clock(sunset_input, coordinates, test_targets)
             .expect("Sunset calc failed");
+        let solar_sunset = result_sunset.pchip_time;
 
         // Use hardcoded assertions as requested for this specific test case
         assert_near_time(solar_sunrise, "08:00:00");
@@ -329,26 +401,26 @@ mod tests {
         // Sunrise
         if let Some(sunrise_utc) = solar_data.sunrise {
             let sunrise_local = sunrise_utc.with_timezone(&Local);
-            let (_, solar_sunrise) =
+            let result =
                 calculate_solar_clock(sunrise_local, coordinates, test_targets)
                     .expect("Sunrise calc failed");
-            assert_near_time(solar_sunrise, &target_sunrise_time);
+            assert_near_time(result.pchip_time, &target_sunrise_time);
         } else {
             println!("Skipping sunrise check (polar night/day)");
         }
 
         // Transit
         let transit_local = solar_data.transit.with_timezone(&Local);
-        let (_, solar_transit) = calculate_solar_clock(transit_local, coordinates, test_targets)
+        let result = calculate_solar_clock(transit_local, coordinates, test_targets)
             .expect("Transit calc failed");
-        assert_near_time(solar_transit, &target_transit_time);
+        assert_near_time(result.pchip_time, &target_transit_time);
 
         // Sunset
         if let Some(sunset_utc) = solar_data.sunset {
             let sunset_local = sunset_utc.with_timezone(&Local);
-            let (_, solar_sunset) = calculate_solar_clock(sunset_local, coordinates, test_targets)
+            let result = calculate_solar_clock(sunset_local, coordinates, test_targets)
                 .expect("Sunset calc failed");
-            assert_near_time(solar_sunset, &target_sunset_time);
+            assert_near_time(result.pchip_time, &target_sunset_time);
         } else {
             println!("Skipping sunset check (polar night/day)");
         }
@@ -385,13 +457,13 @@ mod tests {
             .unwrap()
             .with_timezone(&Local);
 
-        let (_, solar_a) =
+        let result_a =
             calculate_solar_clock(dt_a, coordinates, targets).expect("Calc A failed");
-        let (_, solar_b) =
+        let result_b =
             calculate_solar_clock(dt_b, coordinates, targets).expect("Calc B failed");
 
         assert_eq!(
-            solar_a, solar_b,
+            result_a.pchip_time, result_b.pchip_time,
             "Solar clock should be identical for the same UTC instant despite civil time jump"
         );
     }
